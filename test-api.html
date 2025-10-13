@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html>
+<body>
+    <h2>Test Product API</h2>
+    <button onclick="testAPI()">Test Basic API</button>
+    <button onclick="seedProducts()">Seed Sample Products</button>
+    <button onclick="getProducts()">Get Products</button>
+    <div id="result"></div>
+
+    <script>
+        async function testAPI() {
+            try {
+                const response = await fetch('http://localhost:5000/');
+                const data = await response.json();
+                document.getElementById('result').innerHTML = `<pre>${JSON.stringify(data, null, 2)}</pre>`;
+            } catch (error) {
+                document.getElementById('result').innerHTML = `Error: ${error}`;
+            }
+        }
+
+        async function seedProducts() {
+            try {
+                const response = await fetch('http://localhost:5000/api/products/seed/samples', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    }
+                });
+                const data = await response.json();
+                document.getElementById('result').innerHTML = `<pre>${JSON.stringify(data, null, 2)}</pre>`;
+            } catch (error) {
+                document.getElementById('result').innerHTML = `Error: ${error}`;
+            }
+        }
+
+        async function getProducts() {
+            try {
+                const response = await fetch('http://localhost:5000/api/products');
+                const data = await response.json();
+                document.getElementById('result').innerHTML = `<pre>${JSON.stringify(data, null, 2)}</pre>`;
+            } catch (error) {
+                document.getElementById('result').innerHTML = `Error: ${error}`;
+            }
+        }
+    </script>
+</body>
+</html>
