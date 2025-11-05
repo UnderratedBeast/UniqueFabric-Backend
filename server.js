@@ -3,6 +3,7 @@ import dotenv from "dotenv";
 import cors from "cors";
 import mongoose from "mongoose";
 import productRoutes from "./routes/productRoutes.js";
+// import productRoutes from "./routes/productRoutes.js";
 import authRoutes from "./routes/userRoutes.js";
 import User from "./models/User.js"; // Ensure you only import once
 
@@ -14,6 +15,7 @@ const app = express();
 // Middleware
 app.use(cors());
 app.use(express.json());
+app.use(express.urlencoded());
 
 // Test route
 app.get("/", (req, res) => {
@@ -28,7 +30,8 @@ app.get("/", (req, res) => {
 app.get("/health", (req, res) => {
   res.json({
     status: "OK",
-    database: mongoose.connection.readyState === 1 ? "Connected" : "Disconnected",
+    database:
+      mongoose.connection.readyState === 1 ? "Connected" : "Disconnected",
     timestamp: new Date().toISOString(),
   });
 });
@@ -93,7 +96,9 @@ const createDefaultAdmin = async () => {
 const startServer = async () => {
   try {
     // MongoDB connection
-    const mongoURI = process.env.MONGO_URI || "mongodb+srv://UniqueAdmin:0XAPYWnIWW4S8Aje@uniquefabric.alasprm.mongodb.net/uniquefabric?retryWrites=true&w=majority&appName=UniqueFabric";
+    const mongoURI =
+      process.env.MONGO_URI ||
+      "mongodb+srv://UniqueAdmin:0XAPYWnIWW4S8Aje@uniquefabric.alasprm.mongodb.net/uniquefabric?retryWrites=true&w=majority&appName=UniqueFabric";
 
     console.log("🔄 Connecting to MongoDB...");
     await mongoose.connect(mongoURI);
@@ -110,7 +115,7 @@ const startServer = async () => {
       console.log(`🔗 API URL: http://localhost:${PORT}`);
       console.log(`📚 Products API: http://localhost:${PORT}/api/products`);
       // console.log(`📚 Users API: http://localhost:${PORT}/api/users`);
-      console.log(`❤️ Health check: http://localhost:${PORT}/health`);  
+      console.log(`❤️ Health check: http://localhost:${PORT}/health`);
       console.log(`🗄️ DB Test: http://localhost:${PORT}/api/test-db`);
       console.log(`👤 Admin Login: admin@uniquefabric.com / UniqueAdmin123`);
     });
