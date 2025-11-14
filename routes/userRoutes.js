@@ -3,11 +3,11 @@ import {
   register,
   login,
   getMe,
+  updateProfile,
   forgotPassword,
   verifyOTP,
   resetPassword,
 } from "../controllers/userController.js";
-// import { protect } from "../middleware/authMiddleware.js";
 import { protect } from "../middlewares/authMiddleware.js";
 
 const router = express.Router();
@@ -15,6 +15,7 @@ const router = express.Router();
 router.post("/register", register);
 router.post("/login", login);
 router.get("/me", protect, getMe);
+router.put('/profile', protect, updateProfile);
 router.post("/forgot-password", forgotPassword);
 router.post("/verify-otp", verifyOTP);
 router.post("/reset-password", resetPassword);

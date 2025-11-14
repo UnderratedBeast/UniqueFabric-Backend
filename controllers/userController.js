@@ -1,25 +1,31 @@
 import bcrypt from "bcryptjs";
-import User from "../models/User.js";
 import jwt from "jsonwebtoken";
 import crypto from "crypto";
 import nodemailer from "nodemailer";
+import User from "../models/User.js";
 
+// Generate JWT Token
 const generateToken = (userId) => {
-  return jwt.sign(
-    { userId },
-    process.env.JWT_SECRET || "unique-fabric-secret-key-2024",
-    {
-      expiresIn: "30d",
-    }
-  );
+  return jwt.sign({ userId }, process.env.JWT_SECRET || "unique-fabric-secret-key-2024", {
+    expiresIn: "30d",
+  });
 };
+
+// Nodemailer Transporter (reuse for performance)
+const transporter = nodemailer.createTransport({
+  service: "gmail",
+  auth: {
+    user: process.env.EMAIL_USER,
+    pass: process.env.EMAIL_PASS,
+  },
+});
 
 // @desc    Register user
 // @route   POST /api/auth/register
 // @access  Public
 export const register = async (req, res) => {
   try {
-    const { name, email, password } = req.body;
+    const { name, email, password, phone, address, city, country } = req.body;
 
     // Validation
     if (!name || !email || !password) {
@@ -32,12 +38,12 @@ export const register = async (req, res) => {
     if (password.length < 6) {
       return res.status(400).json({
         success: false,
-        message: "Password must be at least 6 characters",
+        message: "Password must be at least 6 characters long",
       });
     }
 
-    // Check if user exists
-    const existingUser = await User.findOne({ email });
+    // Check if user already exists
+    const existingUser = await User.findOne({ email: email.toLowerCase() });
     if (existingUser) {
       return res.status(400).json({
         success: false,
@@ -45,14 +51,21 @@ export const register = async (req, res) => {
       });
     }
 
-    // Create user
-    const user = await User.create({
-      name,
-      email,
+    // Create new user - only include fields that are provided
+    const userData = {
+      name: name.trim(),
+      email: email.toLowerCase(),
       password,
-    });
+    };
 
-    // Generate token
+    // Add optional fields only if they exist in request
+    if (phone) userData.phone = phone;
+    if (address) userData.address = address;
+    if (city) userData.city = city;
+    if (country) userData.country = country;
+
+    const user = await User.create(userData);
+
     const token = generateToken(user._id);
 
     res.status(201).json({
@@ -62,7 +75,11 @@ export const register = async (req, res) => {
         id: user._id,
         name: user.name,
         email: user.email,
-        isAdmin: user.isAdmin,
+        phone: user.phone || "",
+        address: user.address || "",
+        city: user.city || "",
+        country: user.country || "",
+        isAdmin: user.isAdmin || false,
       },
       token,
     });
@@ -91,7 +108,6 @@ export const login = async (req, res) => {
   try {
     const { email, password } = req.body;
 
-    // Validation
     if (!email || !password) {
       return res.status(400).json({
         success: false,
@@ -99,27 +115,22 @@ export const login = async (req, res) => {
       });
     }
 
-    // Check if user exists
-    const user = await User.findOne({ email });
+    const user = await User.findOne({ email: email.toLowerCase() }).select("+password");
     if (!user) {
       return res.status(401).json({
         success: false,
-        message: "Invalid email",
+        message: "Invalid email or password",
       });
     }
 
-    console.log(user.password);
-
-    // Check password
     const isPasswordCorrect = await user.comparePassword(password);
     if (!isPasswordCorrect) {
       return res.status(401).json({
         success: false,
-        message: "Invalid password",
+        message: "Invalid email or password",
       });
     }
 
-    // Generate token
     const token = generateToken(user._id);
 
     res.json({
@@ -129,7 +140,11 @@ export const login = async (req, res) => {
         id: user._id,
         name: user.name,
         email: user.email,
-        isAdmin: user.isAdmin,
+        phone: user.phone,
+        address: user.address,
+        city: user.city,
+        country: user.country,
+        isAdmin: user.isAdmin || false,
       },
       token,
     });
@@ -148,7 +163,13 @@ export const login = async (req, res) => {
 // @access  Private
 export const getMe = async (req, res) => {
   try {
-    const user = await User.findById(req.user._id);
+    const user = await User.findById(req.user._id).select("-password");
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: "User not found",
+      });
+    }
 
     res.json({
       success: true,
@@ -156,7 +177,11 @@ export const getMe = async (req, res) => {
         id: user._id,
         name: user.name,
         email: user.email,
-        isAdmin: user.isAdmin,
+        phone: user.phone,
+        address: user.address,
+        city: user.city,
+        country: user.country,
+        isAdmin: user.isAdmin || false,
       },
     });
   } catch (error) {
@@ -164,7 +189,6 @@ export const getMe = async (req, res) => {
     res.status(500).json({
       success: false,
       message: "Server error",
-      error: process.env.NODE_ENV === "development" ? error.message : undefined,
     });
   }
 };
@@ -175,39 +199,55 @@ export const getMe = async (req, res) => {
 export const updateProfile = async (req, res) => {
   try {
     const user = await User.findById(req.user._id);
-
-    if (user) {
-      user.name = req.body.name || user.name;
-      user.email = req.body.email || user.email;
-      user.phone = req.body.phone || user.phone;
-      user.address = req.body.address || user.address;
-
-      const updatedUser = await user.save();
-
-      res.json({
-        success: true,
-        message: "Profile updated successfully",
-        user: {
-          id: updatedUser._id,
-          name: updatedUser.name,
-          email: updatedUser.email,
-          isAdmin: updatedUser.isAdmin,
-          phone: updatedUser.phone,
-          address: updatedUser.address,
-        },
-      });
-    } else {
-      res.status(404).json({
+    if (!user) {
+      return res.status(404).json({
         success: false,
         message: "User not found",
       });
     }
+
+    const updates = req.body;
+    const allowedFields = ["name", "email", "phone", "address", "city", "country"];
+
+    allowedFields.forEach((field) => {
+      if (updates[field] !== undefined) {
+        user[field] = updates[field]?.trim() || user[field];
+      }
+    });
+
+    // Prevent email duplication
+    if (updates.email && updates.email !== user.email) {
+      const emailExists = await User.findOne({ email: updates.email.toLowerCase() });
+      if (emailExists) {
+        return res.status(400).json({
+          success: false,
+          message: "Email already in use by another account",
+        });
+      }
+      user.email = updates.email.toLowerCase();
+    }
+
+    const updatedUser = await user.save();
+
+    res.json({
+      success: true,
+      message: "Profile updated successfully",
+      user: {
+        id: updatedUser._id,
+        name: updatedUser.name,
+        email: updatedUser.email,
+        phone: updatedUser.phone,
+        address: updatedUser.address,
+        city: updatedUser.city,
+        country: updatedUser.country,
+        isAdmin: updatedUser.isAdmin || false,
+      },
+    });
   } catch (error) {
     console.error("Update profile error:", error);
     res.status(500).json({
       success: false,
       message: "Server error",
-      error: process.env.NODE_ENV === "development" ? error.message : undefined,
     });
   }
 };
@@ -216,45 +256,55 @@ export const updateProfile = async (req, res) => {
 // @route   POST /api/auth/forgot-password
 // @access  Public
 export const forgotPassword = async (req, res) => {
-  const { email } = req.body;
-
   try {
-    const user = await User.findOne({ email });
-    if (!user) {
-      return res
-        .status(400)
-        .json({ success: false, message: "User not found" });
+    const { email } = req.body;
+    if (!email) {
+      return res.status(400).json({
+        success: false,
+        message: "Please provide an email",
+      });
     }
 
-    // Generate 6-digit OTP
-    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+    const user = await User.findOne({ email: email.toLowerCase() });
+    if (!user) {
+      // Security: Don't reveal if email exists
+      return res.status(200).json({
+        success: true,
+        message: "If your email is registered, an OTP has been sent",
+      });
+    }
 
-    // Hash OTP before saving
+    // Generate secure 6-digit OTP
+    const otp = String(Math.floor(100000 + Math.random() * 900000));
     const otpHash = crypto.createHash("sha256").update(otp).digest("hex");
+
     user.resetOTP = otpHash;
-    user.otpExpires = Date.now() + 10 * 60 * 1000; // valid for 10 minutes
+    user.otpExpires = Date.now() + 10 * 60 * 1000; // 10 minutes
     await user.save();
 
-    // Send OTP via email
-    const transporter = nodemailer.createTransport({
-      service: "gmail",
-      auth: {
-        user: process.env.EMAIL_USER,
-        pass: process.env.EMAIL_PASS,
-      },
-    });
-
+    // Send email
     await transporter.sendMail({
-      from: process.env.EMAIL_USER,
-      to: email,
-      subject: "Password Reset OTP",
-      text: `Your OTP is ${otp}. It expires in 10 minutes.`,
+      from: `"Fabric Store" <${process.env.EMAIL_USER}>`,
+      to: user.email,
+      subject: "🔒 Password Reset Request",
+      html: `
+        <h3>Password Reset OTP</h3>
+        <p>Your OTP is: <strong style="font-size: 18px;">${otp}</strong></p>
+        <p>It will expire in <strong>10 minutes</strong>.</p>
+        <p>If you didn't request this, please ignore this email.</p>
+      `,
     });
 
-    res.status(200).json({ success: true, message: "OTP sent to your email" });
+    res.status(200).json({
+      success: true,
+      message: "If your email is registered, an OTP has been sent",
+    });
   } catch (error) {
     console.error("Forgot password error:", error);
-    res.status(500).json({ success: false, message: "Server error" });
+    res.status(500).json({
+      success: false,
+      message: "Failed to send OTP. Please try again later.",
+    });
   }
 };
 
@@ -262,34 +312,51 @@ export const forgotPassword = async (req, res) => {
 // @route   POST /api/auth/verify-otp
 // @access  Public
 export const verifyOTP = async (req, res) => {
-  const { email, otp } = req.body;
-
   try {
-    const user = await User.findOne({ email });
+    const { email, otp } = req.body;
+
+    if (!email || !otp) {
+      return res.status(400).json({
+        success: false,
+        message: "Email and OTP are required",
+      });
+    }
+
+    const user = await User.findOne({
+      email: email.toLowerCase(),
+      otpExpires: { $gt: Date.now() },
+    });
+
     if (!user || !user.resetOTP) {
-      return res
-        .status(400)
-        .json({ success: false, message: "Invalid or expired OTP" });
+      return res.status(400).json({
+        success: false,
+        message: "Invalid or expired OTP",
+      });
     }
 
-    const otpHash = crypto.createHash("sha256").update(otp).digest("hex");
-    if (otpHash !== user.resetOTP || Date.now() > user.otpExpires) {
-      return res
-        .status(400)
-        .json({ success: false, message: "Invalid or expired OTP" });
+    const otpHash = crypto.createHash("sha256").update(otp.trim()).digest("hex");
+    if (otpHash !== user.resetOTP) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid OTP",
+      });
     }
 
-    // OTP verified → clear it
+    // Clear OTP after successful verification
     user.resetOTP = undefined;
     user.otpExpires = undefined;
     await user.save();
 
-    res
-      .status(200)
-      .json({ success: true, message: "OTP verified successfully" });
+    res.status(200).json({
+      success: true,
+      message: "OTP verified successfully",
+    });
   } catch (error) {
     console.error("Verify OTP error:", error);
-    res.status(500).json({ success: false, message: "Server error" });
+    res.status(500).json({
+      success: false,
+      message: "Server error",
+    });
   }
 };
 
@@ -297,36 +364,44 @@ export const verifyOTP = async (req, res) => {
 // @route   POST /api/auth/reset-password
 // @access  Public
 export const resetPassword = async (req, res) => {
-  const { email, newPassword } = req.body;
-
   try {
-    // 1️⃣ Find user by email
-    const user = await User.findOne({ email });
-    if (!user) {
-      return res
-        .status(400)
-        .json({ success: false, message: "User not found" });
+    const { email, newPassword } = req.body;
+
+    if (!email || !newPassword) {
+      return res.status(400).json({
+        success: false,
+        message: "Email and new password are required",
+      });
     }
 
-    // 2️⃣ Hash the new password
+    if (newPassword.length < 6) {
+      return res.status(400).json({
+        success: false,
+        message: "Password must be at least 6 characters long",
+      });
+    }
 
-    const saltRounds = 10;
-    console.log(newPassword);
-    console.log(saltRounds);
+    const user = await User.findOne({ email: email.toLowerCase() });
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: "User not found",
+      });
+    }
+
+    // Re-hash password properly using bcrypt via model
     user.password = newPassword;
-    // const hashedPassword = await bcrypt.hash(newPassword, saltRounds);
-
-    // // 3️⃣ Update and save
-    // user.password = hashedPassword;
-    // console.log(hashedPassword);
     await user.save();
 
-    // 4️⃣ Respond success
-    res
-      .status(200)
-      .json({ success: true, message: "Password reset successful" });
+    res.status(200).json({
+      success: true,
+      message: "Password reset successful",
+    });
   } catch (error) {
     console.error("Reset password error:", error);
-    res.status(500).json({ success: false, message: "Server error" });
+    res.status(500).json({
+      success: false,
+      message: "Server error",
+    });
   }
 };

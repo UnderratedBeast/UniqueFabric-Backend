@@ -25,6 +25,7 @@ import {
   createProduct,
   updateProduct,
   deleteProduct,
+  addStockToProducts,
   createSampleProducts,
 } from "../controllers/productController.js";
 import Product from "../models/Product.js";
@@ -39,6 +40,9 @@ router.get("/:id", getProductById);
 router.post("/", createProduct);
 router.put("/:id", updateProduct);
 router.delete("/:id", deleteProduct);
+
+//
+router.patch('/add-stock', addStockToProducts);
 
 // Seed route (temporary - for adding sample data)
 router.post("/seed/samples", createSampleProducts);
@@ -67,3 +71,4 @@ router.post("/cart", async (req, res) => {
 });
 
 export default router;
+
