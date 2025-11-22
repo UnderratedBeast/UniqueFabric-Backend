@@ -129,6 +129,9 @@ import productRoutes from "./routes/productRoutes.js";
 import authRoutes from "./routes/userRoutes.js";
 import orderRoutes from "./routes/orderRoutes.js"; 
 import User from "./models/User.js";
+// Add this import at the top with other imports
+import contactRoutes from "./routes/contactRoutes.js";
+
 
 // Load environment variables
 dotenv.config();
@@ -173,6 +176,12 @@ app.get("/api/test-db", async (req, res) => {
 app.use("/api/products", productRoutes);
 app.use("/api/auth", authRoutes);
 app.use("/api/orders", orderRoutes);
+
+
+// Add this with your other route imports in the API Routes section
+app.use("/api/contact", contactRoutes);
+
+
 
 // 404 Handler
 app.use((req, res) => {
