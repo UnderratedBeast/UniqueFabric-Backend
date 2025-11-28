@@ -128,10 +128,9 @@ import mongoose from "mongoose";
 import productRoutes from "./routes/productRoutes.js";
 import authRoutes from "./routes/userRoutes.js";
 import orderRoutes from "./routes/orderRoutes.js"; 
-import User from "./models/User.js";
-// Add this import at the top with other imports
 import contactRoutes from "./routes/contactRoutes.js";
-
+import recentlyViewedRoutes from "./routes/recentlyViewed.js";
+import User from "./models/User.js";
 
 // Load environment variables
 dotenv.config();
@@ -176,12 +175,8 @@ app.get("/api/test-db", async (req, res) => {
 app.use("/api/products", productRoutes);
 app.use("/api/auth", authRoutes);
 app.use("/api/orders", orderRoutes);
-
-
-// Add this with your other route imports in the API Routes section
 app.use("/api/contact", contactRoutes);
-
-
+app.use('/api/recently-viewed', recentlyViewedRoutes);
 
 // 404 Handler
 app.use((req, res) => {
@@ -261,6 +256,8 @@ const startServer = async () => {
       console.log(`📚 Products API: http://localhost:${PORT}/api/products`);
       console.log(`👥 Auth API: http://localhost:${PORT}/api/auth`);
       console.log(`🛒 Orders API: http://localhost:${PORT}/api/orders`);
+      console.log(`📞 Contact API: http://localhost:${PORT}/api/contact`);
+      console.log(`👀 Recently Viewed API: http://localhost:${PORT}/api/recently-viewed`);
       console.log(`❤️ Health check: http://localhost:${PORT}/health`);
       console.log(`🗄️ DB Test: http://localhost:${PORT}/api/test-db`);
       console.log(`\n👤 Default Users Created:`);
