@@ -74,6 +74,18 @@ const orderSchema = new mongoose.Schema({
     required: true,
     default: 'card'
   },
+  // Reference to saved payment method if used
+  paymentMethodId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'PaymentMethod',
+    required: false
+  },
+  // Reference to saved address if used
+  shippingAddressId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Address',
+    required: false
+  },
   itemsPrice: {
     type: Number,
     required: true,
@@ -109,12 +121,16 @@ const orderSchema = new mongoose.Schema({
   }],
   trackingNumber: String,
   estimatedDelivery: Date,
-  orderNotes: String
+  orderNotes: String,
+  paidAt: {
+    type: Date,
+    default: Date.now
+  }
 }, {
   timestamps: true
 });
 
-// Generate order number before saving - FIXED VERSION
+// Generate order number before saving
 orderSchema.pre('save', async function(next) {
   if (this.isNew && !this.orderNumber) {
     try {
@@ -123,14 +139,19 @@ orderSchema.pre('save', async function(next) {
       const count = await OrderModel.countDocuments();
       
       // Generate unique order number
-      this.orderNumber = `ORD-${Date.now()}-${count + 1}`;
+      this.orderNumber = `ORD-${Date.now()}-${String(count + 1).padStart(6, '0')}`;
       
       // Add initial status to history
-      this.statusHistory.push({
+      this.statusHistory = [{
         status: this.status,
         date: new Date(),
         note: 'Order created'
-      });
+      }];
+      
+      // Set paidAt if not already set
+      if (!this.paidAt) {
+        this.paidAt = new Date();
+      }
       
       next();
     } catch (error) {
@@ -143,5 +164,44 @@ orderSchema.pre('save', async function(next) {
     next();
   }
 });
+
+// Virtual for formatted order date
+orderSchema.virtual('formattedDate').get(function() {
+  return this.createdAt.toLocaleDateString('en-US', {
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric'
+  });
+});
+
+// Virtual for order total with currency
+orderSchema.virtual('totalWithCurrency').get(function() {
+  return `$${this.totalPrice.toFixed(2)}`;
+});
+
+// Static method to get orders by user
+orderSchema.statics.getUserOrders = async function(userId) {
+  return await this.find({ user: userId })
+    .sort({ createdAt: -1 })
+    .populate('paymentMethodId', 'lastFour cardType cardHolder')
+    .populate('shippingAddressId', 'fullName street city state zipCode phone');
+};
+
+// Static method to get order statistics
+orderSchema.statics.getUserStats = async function(userId) {
+  const stats = await this.aggregate([
+    { $match: { user: mongoose.Types.ObjectId(userId) } },
+    {
+      $group: {
+        _id: null,
+        totalOrders: { $sum: 1 },
+        totalSpent: { $sum: '$totalPrice' },
+        averageOrderValue: { $avg: '$totalPrice' }
+      }
+    }
+  ]);
+  
+  return stats[0] || { totalOrders: 0, totalSpent: 0, averageOrderValue: 0 };
+};
 
 export default mongoose.model('Order', orderSchema);
