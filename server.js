@@ -131,6 +131,9 @@ import orderRoutes from "./routes/orderRoutes.js";
 import contactRoutes from "./routes/contactRoutes.js";
 import recentlyViewedRoutes from "./routes/recentlyViewed.js";
 import User from "./models/User.js";
+import addressRoutes from "./routes/addressRoutes.js";
+import paymentRoutes from "./routes/paymentRoutes.js";
+
 
 // Load environment variables
 dotenv.config();
@@ -177,6 +180,8 @@ app.use("/api/auth", authRoutes);
 app.use("/api/orders", orderRoutes);
 app.use("/api/contact", contactRoutes);
 app.use('/api/recently-viewed', recentlyViewedRoutes);
+app.use("/api/addresses", addressRoutes);
+app.use("/api/payments", paymentRoutes);
 
 // 404 Handler
 app.use((req, res) => {
