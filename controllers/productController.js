@@ -49,6 +49,45 @@ export const getProductById = async (req, res) => {
   }
 };
 
+
+export const getProductsByIds = async (req, res) => {
+  try {
+    const { ids } = req.body;
+    
+    if (!ids || !Array.isArray(ids)) {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'Product IDs array required' 
+      });
+    }
+
+    // Filter out invalid IDs
+    const validIds = ids.filter(id => mongoose.Types.ObjectId.isValid(id));
+    
+    if (validIds.length === 0) {
+      return res.json({ 
+        success: true, 
+        products: [] 
+      });
+    }
+
+    const products = await Product.find({ 
+      _id: { $in: validIds } 
+    }).select('name price stock imageUrl category description');
+
+    res.json({ 
+      success: true, 
+      products 
+    });
+  } catch (error) {
+    console.error('Get products by IDs error:', error);
+    res.status(500).json({ 
+      success: false, 
+      message: 'Server error' 
+    });
+  }
+};
+
 /* ==============================================================
    ADMIN ROUTES
    ============================================================== */

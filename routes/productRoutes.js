@@ -7,6 +7,7 @@ import {
   deleteProduct,
   addStockToProducts,
   createSampleProducts,
+  getProductsByIds
 } from "../controllers/productController.js";
 import Product from "../models/Product.js";
 
@@ -15,19 +16,19 @@ const router = express.Router();
 // Public routes
 router.get("/", getProducts);
 router.get("/:id", getProductById);
+router.post("/bulk", getProductsByIds);  
 
 // Admin routes (for product management)
 router.post("/", createProduct);
 router.put("/:id", updateProduct);
 router.delete("/:id", deleteProduct);
 
-//
 router.patch('/add-stock', addStockToProducts);
 
 // Seed route (temporary - for adding sample data)
 router.post("/seed/samples", createSampleProducts);
 
-// for the cart
+// Cart route
 router.post("/cart", async (req, res) => {
   try {
     const { ids } = req.body;
@@ -51,4 +52,3 @@ router.post("/cart", async (req, res) => {
 });
 
 export default router;
-
