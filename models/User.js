@@ -136,6 +136,10 @@ const userSchema = new mongoose.Schema(
       type: Boolean,
       default: false,
     },
+    newsletterSubscribed: {
+      type: Boolean,
+      default: true
+    },
     resetOTP: { type: String, required: false },
     otpExpires: Date,
   },

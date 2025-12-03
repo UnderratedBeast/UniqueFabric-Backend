@@ -7,6 +7,8 @@ import {
   forgotPassword,
   verifyOTP,
   resetPassword,
+  getNewsletterPreference, 
+  updateNewsletterPreference,
 } from "../controllers/userController.js";
 import { protect } from "../middlewares/authMiddleware.js";
 
@@ -19,4 +21,8 @@ router.put('/profile', protect, updateProfile);
 router.post("/forgot-password", forgotPassword);
 router.post("/verify-otp", verifyOTP);
 router.post("/reset-password", resetPassword);
+
+router.get('/newsletter-preference', protect, getNewsletterPreference);
+router.put('/newsletter-preference', protect, updateNewsletterPreference);
+
 export default router;
