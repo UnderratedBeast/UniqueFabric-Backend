@@ -7,8 +7,6 @@ import Order from '../models/Order.js';
 // @route   POST /api/reviews
 // @access  Private
 export const createReview = async (req, res) => {
-  // We'll handle this without transaction to avoid write conflicts
-  // or use retry logic for transient errors
   const maxRetries = 3;
   let retryCount = 0;
 
@@ -123,8 +121,7 @@ export const createReview = async (req, res) => {
       const review = new Review(reviewData);
       await review.save();
 
-      // Update order item as reviewed - using findByIdAndUpdate instead of findOneAndUpdate
-      // to avoid potential write conflicts
+      // Update order item as reviewed
       const orderDoc = await Order.findById(orderId);
       if (orderDoc) {
         const itemIndex = orderDoc.orderItems.findIndex(
@@ -138,12 +135,8 @@ export const createReview = async (req, res) => {
         }
       }
 
-      // Update product rating stats
-      const stats = await Review.getProductAverageRating(productId);
-      await Product.findByIdAndUpdate(productId, {
-        rating: stats.averageRating,
-        reviews: stats.totalReviews
-      });
+      // Update product rating stats (handled by post-save hook)
+      // The hook will update the product rating automatically
 
       // Populate and return the review
       const populatedReview = await Review.findById(review._id)
@@ -268,7 +261,7 @@ export const getProductReviews = async (req, res) => {
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 10;
     const rating = req.query.rating;
-    const sortBy = req.query.sortBy || 'helpful'; // helpful, recent, highest, lowest
+    const sortBy = req.query.sortBy || 'helpful';
     const verified = req.query.verified;
 
     // Validate product exists
@@ -280,36 +273,25 @@ export const getProductReviews = async (req, res) => {
       });
     }
 
+    // Get current user ID if logged in
+    const userId = req.user?._id || null;
+
     // Build filters
-    const filters = {};
-    if (rating) filters.rating = parseInt(rating);
-    if (verified) filters.verifiedPurchase = verified === 'true';
+    const filters = {
+      rating: rating || '',
+      sortBy: sortBy,
+      verified: verified || false
+    };
 
-    // Get reviews
-    const result = await Review.getProductReviews(productId, page, limit, filters);
-
-    // Apply sort
-    let reviews = result.reviews;
-    switch (sortBy) {
-      case 'recent':
-        reviews.sort((a, b) => b.createdAt - a.createdAt);
-        break;
-      case 'highest':
-        reviews.sort((a, b) => b.rating - a.rating || b.createdAt - a.createdAt);
-        break;
-      case 'lowest':
-        reviews.sort((a, b) => a.rating - b.rating || b.createdAt - a.createdAt);
-        break;
-      case 'helpful':
-      default:
-        reviews.sort((a, b) => b.helpfulCount - a.helpfulCount);
-    }
+    // Get reviews with user helpful status
+    const result = await Review.getProductReviews(productId, userId, page, limit, filters);
 
     // Get rating distribution
     const stats = await Review.getProductAverageRating(productId);
+    
     res.json({
       success: true,
-      reviews,
+      reviews: result.reviews,
       summary: {
         averageRating: stats.averageRating,
         totalReviews: stats.totalReviews,
@@ -387,12 +369,7 @@ export const updateReview = async (req, res) => {
 
     await review.save();
 
-    // Update product stats
-    const stats = await Review.getProductAverageRating(review.product);
-    await Product.findByIdAndUpdate(review.product, {
-      rating: stats.averageRating,
-      reviews: stats.totalReviews
-    });
+    // Product stats updated by post-save hook
 
     const updatedReview = await Review.findById(id)
       .populate('product', 'name images price')
@@ -452,12 +429,7 @@ export const deleteReview = async (req, res) => {
     
     await review.save();
 
-    // Update product stats
-    const stats = await Review.getProductAverageRating(review.product);
-    await Product.findByIdAndUpdate(review.product, {
-      rating: stats.averageRating,
-      reviews: stats.totalReviews
-    });
+    // Product stats updated by post-update hook
 
     res.json({
       success: true,
@@ -473,10 +445,10 @@ export const deleteReview = async (req, res) => {
   }
 };
 
-// @desc    Mark review as helpful
+// @desc    Toggle helpful status for a review
 // @route   POST /api/reviews/:id/helpful
 // @access  Private
-export const markHelpful = async (req, res) => {
+export const toggleHelpful = async (req, res) => {
   try {
     const { id } = req.params;
 
@@ -497,26 +469,82 @@ export const markHelpful = async (req, res) => {
       });
     }
 
-    // Simple helpful count increment
-    review.helpfulCount += 1;
-    await review.save();
+    // Toggle helpful status using the instance method
+    const result = await review.toggleHelpful(req.user._id);
 
     res.json({
       success: true,
-      message: 'Review marked as helpful',
-      helpfulCount: review.helpfulCount
+      message: result.userHasMarkedHelpful ? 'Marked as helpful' : 'Removed helpful mark',
+      helpfulCount: result.helpfulCount,
+      userHasMarkedHelpful: result.userHasMarkedHelpful
     });
 
   } catch (error) {
-    console.error('Mark helpful error:', error);
+    console.error('Toggle helpful error:', error);
     res.status(500).json({
       success: false,
-      message: 'Server error marking review as helpful'
+      message: 'Server error toggling helpful status'
     });
   }
 };
 
-// @desc    Report a review (auto-removal for spam)
+// @desc    Get helpful status for current user
+// @route   GET /api/reviews/:id/helpful-status
+// @access  Private
+export const getHelpfulStatus = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const review = await Review.findById(id);
+
+    if (!review) {
+      return res.status(404).json({
+        success: false,
+        message: 'Review not found'
+      });
+    }
+
+    // Check if user has marked this review as helpful
+    const hasMarked = review.hasUserMarkedHelpful(req.user._id);
+
+    res.json({
+      success: true,
+      userHasMarkedHelpful: hasMarked,
+      helpfulCount: review.helpfulCount
+    });
+
+  } catch (error) {
+    console.error('Get helpful status error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error getting helpful status'
+    });
+  }
+};
+
+// @desc    Get user's helpful votes
+// @route   GET /api/reviews/helpful/user-votes
+// @access  Private
+export const getUserHelpfulVotes = async (req, res) => {
+  try {
+    const votes = await Review.getUserHelpfulVotes(req.user._id);
+
+    res.json({
+      success: true,
+      votes,
+      totalVotes: Object.keys(votes).length
+    });
+
+  } catch (error) {
+    console.error('Get user helpful votes error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error getting helpful votes'
+    });
+  }
+};
+
+// @desc    Report a review
 // @route   POST /api/reviews/:id/report
 // @access  Private
 export const reportReview = async (req, res) => {
@@ -564,12 +592,7 @@ export const reportReview = async (req, res) => {
 
     await review.save();
 
-    // Update product stats
-    const stats = await Review.getProductAverageRating(review.product);
-    await Product.findByIdAndUpdate(review.product, {
-      rating: stats.averageRating,
-      reviews: stats.totalReviews
-    });
+    // Product stats updated by post-save hook
 
     res.json({
       success: true,
@@ -671,12 +694,7 @@ export const adminRemoveReview = async (req, res) => {
 
     await review.save();
 
-    // Update product stats
-    const stats = await Review.getProductAverageRating(review.product);
-    await Product.findByIdAndUpdate(review.product, {
-      rating: stats.averageRating,
-      reviews: stats.totalReviews
-    });
+    // Product stats updated by post-save hook
 
     res.json({
       success: true,
@@ -730,12 +748,7 @@ export const adminRestoreReview = async (req, res) => {
 
     await review.save();
 
-    // Update product stats
-    const stats = await Review.getProductAverageRating(review.product);
-    await Product.findByIdAndUpdate(review.product, {
-      rating: stats.averageRating,
-      reviews: stats.totalReviews
-    });
+    // Product stats updated by post-save hook
 
     res.json({
       success: true,
@@ -779,12 +792,7 @@ export const adminDeleteReview = async (req, res) => {
     // Delete the review permanently
     await Review.findByIdAndDelete(id);
 
-    // Update product stats
-    const stats = await Review.getProductAverageRating(productId);
-    await Product.findByIdAndUpdate(productId, {
-      rating: stats.averageRating,
-      reviews: stats.totalReviews
-    });
+    // Product stats updated by post-delete hook
 
     res.json({
       success: true,
@@ -856,6 +864,23 @@ export const getReviewStats = async (req, res) => {
     const averageRating = avgRatingResult.length > 0 ? 
       Math.round(avgRatingResult[0].average * 10) / 10 : 0;
 
+    // Get helpful statistics
+    const helpfulStats = await Review.aggregate([
+      {
+        $match: {
+          status: 'published'
+        }
+      },
+      {
+        $group: {
+          _id: null,
+          totalHelpfulCount: { $sum: '$helpfulCount' },
+          avgHelpfulPerReview: { $avg: '$helpfulCount' },
+          mostHelpfulReview: { $max: '$helpfulCount' }
+        }
+      }
+    ]);
+
     res.json({
       success: true,
       stats: {
@@ -867,7 +892,12 @@ export const getReviewStats = async (req, res) => {
         verifiedPurchaseCount: await Review.countDocuments({ 
           status: 'published',
           verifiedPurchase: true 
-        })
+        }),
+        helpfulStats: helpfulStats[0] || {
+          totalHelpfulCount: 0,
+          avgHelpfulPerReview: 0,
+          mostHelpfulReview: 0
+        }
       }
     });
 
