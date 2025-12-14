@@ -6,7 +6,9 @@ import {
   getProductReviews,
   updateReview,
   deleteReview,
-  markHelpful,
+  toggleHelpful,
+  getHelpfulStatus,
+  getUserHelpfulVotes,
   reportReview,
   getAllReviews,
   adminRemoveReview,
@@ -21,15 +23,22 @@ const router = express.Router();
 // Public routes
 router.get('/product/:productId', getProductReviews);
 
-// Protected routes (user only)
+// User routes - Authentication required
 router.use(protect);
 
+// Review management
 router.get('/pending', getPendingReviews);
 router.get('/my-reviews', getMyReviews);
 router.post('/', createReview);
 router.put('/:id', updateReview);
 router.delete('/:id', deleteReview);
-router.post('/:id/helpful', markHelpful);
+
+// Helpful functionality
+router.post('/:id/helpful', toggleHelpful); // Toggle helpful status
+router.get('/:id/helpful-status', getHelpfulStatus); // Check if user marked as helpful
+router.get('/helpful/user-votes', getUserHelpfulVotes); // Get all user's helpful votes
+
+// Report review
 router.post('/:id/report', reportReview);
 
 // Admin/Manager routes

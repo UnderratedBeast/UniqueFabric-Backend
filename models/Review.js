@@ -36,6 +36,10 @@ const reviewSchema = new mongoose.Schema({
     type: Number,
     default: 0
   },
+  helpfulUsers: [{
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User'
+  }],
   verifiedPurchase: {
     type: Boolean,
     default: false
@@ -72,6 +76,7 @@ reviewSchema.index({ user: 1, product: 1, order: 1 }, { unique: true });
 reviewSchema.index({ product: 1, status: 1, createdAt: -1 });
 reviewSchema.index({ user: 1, createdAt: -1 });
 reviewSchema.index({ rating: 1, product: 1 });
+reviewSchema.index({ helpfulCount: -1 }); // For sorting by helpful
 
 // Static method to get product average rating
 reviewSchema.statics.getProductAverageRating = async function(productId) {
@@ -183,8 +188,8 @@ reviewSchema.statics.getUserReviews = async function(userId, page = 1, limit = 1
   };
 };
 
-// Static method to get product reviews
-reviewSchema.statics.getProductReviews = async function(productId, page = 1, limit = 10, filters = {}) {
+// Static method to get product reviews with helpful status for current user
+reviewSchema.statics.getProductReviews = async function(productId, userId = null, page = 1, limit = 10, filters = {}) {
   const skip = (page - 1) * limit;
   
   let query = { 
@@ -201,16 +206,45 @@ reviewSchema.statics.getProductReviews = async function(productId, page = 1, lim
     query.verifiedPurchase = filters.verifiedPurchase === 'true';
   }
 
+  // Build sort query
+  let sortQuery = {};
+  if (filters.sortBy === 'recent') {
+    sortQuery.createdAt = -1;
+  } else if (filters.sortBy === 'highest') {
+    sortQuery.rating = -1;
+    sortQuery.createdAt = -1;
+  } else if (filters.sortBy === 'lowest') {
+    sortQuery.rating = 1;
+    sortQuery.createdAt = -1;
+  } else {
+    // Default: most helpful
+    sortQuery.helpfulCount = -1;
+    sortQuery.createdAt = -1;
+  }
+
   const reviews = await this.find(query)
     .populate('user', 'name')
-    .sort({ helpfulCount: -1, createdAt: -1 })
+    .sort(sortQuery)
     .skip(skip)
     .limit(limit);
+
+  // Add helpful status for current user
+  const reviewsWithStatus = reviews.map(review => {
+    const reviewObj = review.toObject();
+    if (userId) {
+      reviewObj.userHasMarkedHelpful = review.helpfulUsers.some(
+        id => id.toString() === userId.toString()
+      );
+    } else {
+      reviewObj.userHasMarkedHelpful = false;
+    }
+    return reviewObj;
+  });
 
   const total = await this.countDocuments(query);
 
   return {
-    reviews,
+    reviews: reviewsWithStatus,
     total,
     pages: Math.ceil(total / limit),
     currentPage: page
@@ -254,11 +288,47 @@ reviewSchema.statics.getAllReviews = async function(page = 1, limit = 20, filter
   };
 };
 
-// Instance method to mark review as helpful
-reviewSchema.methods.markHelpful = async function(userId) {
-  // In auto-publish system, we don't track individual votes
-  this.helpfulCount += 1;
+// Instance method to toggle helpful status
+reviewSchema.methods.toggleHelpful = async function(userId) {
+  const userIndex = this.helpfulUsers.findIndex(
+    id => id.toString() === userId.toString()
+  );
+  
+  if (userIndex === -1) {
+    // User hasn't marked as helpful - add them
+    this.helpfulUsers.push(userId);
+    this.helpfulCount += 1;
+  } else {
+    // User has already marked - remove them
+    this.helpfulUsers.splice(userIndex, 1);
+    this.helpfulCount = Math.max(0, this.helpfulCount - 1);
+  }
+  
   await this.save();
+  return {
+    helpfulCount: this.helpfulCount,
+    userHasMarkedHelpful: userIndex === -1 // true if user just marked, false if unmarked
+  };
+};
+
+// Instance method to check if user has marked as helpful
+reviewSchema.methods.hasUserMarkedHelpful = function(userId) {
+  if (!userId) return false;
+  return this.helpfulUsers.some(
+    id => id.toString() === userId.toString()
+  );
+};
+
+// Static method to get user's helpful votes
+reviewSchema.statics.getUserHelpfulVotes = async function(userId) {
+  const reviews = await this.find({
+    helpfulUsers: userId
+  }).select('_id product');
+  
+  return reviews.reduce((acc, review) => {
+    acc[review._id] = true;
+    return acc;
+  }, {});
 };
 
 // Pre-save middleware to set verifiedPurchase
@@ -286,7 +356,7 @@ reviewSchema.post('save', async function(doc) {
     const Review = mongoose.model('Review');
     const Product = mongoose.model('Product');
     
-    const stats = await Review.getProductAverageRating(doc.product.toString()); // FIXED: Ensure string
+    const stats = await Review.getProductAverageRating(doc.product.toString());
     await Product.findByIdAndUpdate(doc.product, {
       rating: stats.averageRating,
       reviews: stats.totalReviews
@@ -300,7 +370,7 @@ reviewSchema.post('findOneAndUpdate', async function(doc) {
     const Review = mongoose.model('Review');
     const Product = mongoose.model('Product');
     
-    const stats = await Review.getProductAverageRating(doc.product.toString()); // FIXED: Ensure string
+    const stats = await Review.getProductAverageRating(doc.product.toString());
     await Product.findByIdAndUpdate(doc.product, {
       rating: stats.averageRating,
       reviews: stats.totalReviews
@@ -314,7 +384,7 @@ reviewSchema.post('findOneAndDelete', async function(doc) {
     const Review = mongoose.model('Review');
     const Product = mongoose.model('Product');
     
-    const stats = await Review.getProductAverageRating(doc.product.toString()); // FIXED: Ensure string
+    const stats = await Review.getProductAverageRating(doc.product.toString());
     await Product.findByIdAndUpdate(doc.product, {
       rating: stats.averageRating,
       reviews: stats.totalReviews
